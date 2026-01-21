@@ -9,7 +9,7 @@ import (
 	"os"
 	"runtime/pprof"
 
-	"github.com/slsyy/mtimehash"
+	"github.com/Hakonslie/mtimehash"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/automaxprocs/maxprocs"
 )

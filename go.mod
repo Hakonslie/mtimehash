@@ -1,4 +1,4 @@
-module github.com/slsyy/mtimehash
+module github.com/Hakonslie/mtimehash
 
 go 1.23.4
 

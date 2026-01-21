@@ -25,15 +25,36 @@ was modified/clone, so a hit ratio should be much higher.
 
 ## Usage
 
+### Processing Files
+
 Pass a list of files to modify via stdin:
 
 ```shell
-find . -type f | mtimehash
+find . -type f | mtimehash files
 ```
 
 In my project I use:
 ```shell
-find . -type f -size -10000k ! -path ./.git/\*\* | mtimehash
+find . -type f -size -10000k ! -path ./.git/\*\* | mtimehash files
 ```
 
 to skip large files and `.git` directory
+
+### Processing Directories
+
+Pass a list of directories to modify via stdin:
+
+```shell
+find . -type d | mtimehash dirs
+```
+
+The directory modification time is set based on a hash of the directory contents (file and subdirectory names), making it deterministic based on what files are present in the directory.
+
+Note: It's recommended to process files first, then directories:
+
+```shell
+find . -type f | mtimehash files
+find . -type d | mtimehash dirs
+```
+
+This ensures directories get updated mtimes based on the final state of their contents.

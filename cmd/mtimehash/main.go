@@ -47,6 +47,18 @@ func run() int {
 				Usage: "Path to CPU profile output file",
 			},
 		},
+		Commands: []*cli.Command{
+			{
+				Name:   "files",
+				Usage:  "Set file modification times based on the hash of the file content (default)",
+				Action: filesCommand,
+			},
+			{
+				Name:   "dirs",
+				Usage:  "Set directory modification times based on the hash of directory contents",
+				Action: dirsCommand,
+			},
+		},
 		Action: mainApp,
 	}
 
@@ -56,17 +68,12 @@ func run() int {
 	return 0
 }
 
-// Only for tests
-// nolint:gochecknoglobals
-var silentLogs = false
+func setupCommonFlags(c *cli.Context) (maxUnixTime int64, verbose bool, cpuProfile string, logger *slog.Logger) {
+	maxUnixTime = c.Int64(maxUnixTimeFlag)
+	verbose = c.Bool(verboseFlag)
+	cpuProfile = c.Path(cpuProfileFlag)
 
-// mainApp handles the CLI logic
-func mainApp(c *cli.Context) error {
-	maxUnixTime := c.Int64(maxUnixTimeFlag)
-	verbose := c.Bool(verboseFlag)
-	cpuProfile := c.Path(cpuProfileFlag)
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: func() slog.Level {
 			if verbose {
 				return slog.LevelDebug
@@ -91,21 +98,49 @@ func mainApp(c *cli.Context) error {
 		f, err := os.Create(cpuProfile)
 		if err != nil {
 			logger.Error("failed to create CPU profile file", "err", err)
-			return err
+			return 0, false, "", logger
 		}
 		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
 			logger.Error("failed to start CPU profiling", "err", err)
-			return err
+			return 0, false, "", logger
 		}
 		defer pprof.StopCPUProfile()
 	}
+
+	return maxUnixTime, verbose, cpuProfile, logger
+}
+
+// filesCommand processes files (original behavior)
+func filesCommand(c *cli.Context) error {
+	maxUnixTime, _, _, logger := setupCommonFlags(c)
 
 	if err := mtimehash.Process(streamLines(os.Stdin), maxUnixTime); err != nil {
 		logger.Error("failed to process files", "err", err)
 		return err
 	}
 	return nil
+}
+
+// dirsCommand processes directories
+func dirsCommand(c *cli.Context) error {
+	maxUnixTime, _, _, logger := setupCommonFlags(c)
+
+	if err := mtimehash.ProcessDirectories(streamLines(os.Stdin), maxUnixTime); err != nil {
+		logger.Error("failed to process directories", "err", err)
+		return err
+	}
+	return nil
+}
+
+// Only for tests
+// nolint:gochecknoglobals
+var silentLogs = false
+
+// mainApp handles the CLI logic
+func mainApp(c *cli.Context) error {
+	// Default to files command if no subcommand provided
+	return filesCommand(c)
 }
 
 func streamLines(input io.Reader) iter.Seq[string] {

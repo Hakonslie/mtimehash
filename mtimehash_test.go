@@ -78,6 +78,63 @@ func setupFiles(t *testing.T, files map[string]string) []string {
 	return filePaths
 }
 
+func TestProcessDirectories(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create test directories with different contents
+	dir1 := filepath.Join(tempDir, "dir1")
+	dir2 := filepath.Join(tempDir, "dir2")
+	dir3 := filepath.Join(tempDir, "dir3")
+
+	require.NoError(t, os.Mkdir(dir1, 0o777))
+	require.NoError(t, os.Mkdir(dir2, 0o777))
+	require.NoError(t, os.Mkdir(dir3, 0o777))
+
+	// Add different contents to each directory
+	require.NoError(t, os.WriteFile(filepath.Join(dir1, "a.txt"), []byte("content"), 0o666))
+	require.NoError(t, os.WriteFile(filepath.Join(dir1, "b.txt"), []byte("content"), 0o666))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir2, "a.txt"), []byte("content"), 0o666))
+	require.NoError(t, os.WriteFile(filepath.Join(dir2, "c.txt"), []byte("content"), 0o666))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir3, "a.txt"), []byte("content"), 0o666))
+	require.NoError(t, os.WriteFile(filepath.Join(dir3, "b.txt"), []byte("content"), 0o666))
+
+	dirs := []string{dir1, dir2, dir3}
+
+	t.Run("happy path", func(t *testing.T) {
+		require.NoError(t, ProcessDirectories(slices.Values(dirs), 1000000000))
+
+		mtimes := getMtimes(t, dirs)
+		// dir1 and dir3 have same contents (a.txt, b.txt) so should have same mtime
+		assert.Equal(t, mtimes[path.Base(dir1)], mtimes[path.Base(dir3)])
+		// dir2 has different contents so should have different mtime
+		assert.NotEqual(t, mtimes[path.Base(dir1)], mtimes[path.Base(dir2)])
+	})
+
+	t.Run("low maxUnixTime", func(t *testing.T) {
+		require.NoError(t, ProcessDirectories(slices.Values(dirs), 10))
+
+		mtimes := getMtimes(t, dirs)
+		// dir1 and dir3 should still have same mtime
+		assert.Equal(t, mtimes[path.Base(dir1)], mtimes[path.Base(dir3)])
+		// dir2 should be different
+		assert.NotEqual(t, mtimes[path.Base(dir1)], mtimes[path.Base(dir2)])
+	})
+
+	t.Run("empty directory", func(t *testing.T) {
+		emptyDir := filepath.Join(tempDir, "empty")
+		require.NoError(t, os.Mkdir(emptyDir, 0o777))
+
+		require.NoError(t, ProcessDirectories(slices.Values([]string{emptyDir}), 1000000000))
+
+		// Should succeed without error
+		s, err := os.Stat(emptyDir)
+		require.NoError(t, err)
+		assert.NotZero(t, s.ModTime().Unix())
+	})
+}
+
 func getMtimes(t *testing.T, files []string) map[string]int64 {
 	t.Helper()
 	mtimes := make(map[string]int64)

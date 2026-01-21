@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"sort"
 	"time"
 
 	"github.com/sourcegraph/conc/pool"
@@ -66,5 +67,67 @@ func updateMtime(filePath string, maxUnixTime int64) error {
 	}
 
 	logger.Debug("updated file modification time", "file", filePath, "mtime", mtime)
+	return nil
+}
+
+// ProcessDirectories processes directories and updates their modification time based on their contents.
+// The mtime is set based on a hash of the directory entries (sorted names), making it deterministic
+// based on what files/subdirectories are present.
+func ProcessDirectories(input iter.Seq[string], maxUnixTime int64) error {
+	p := pool.New().WithErrors().WithMaxGoroutines(runtime.GOMAXPROCS(0))
+	for dirPath := range input {
+		p.Go(func() error {
+			err := updateDirMtime(dirPath, maxUnixTime)
+			if err != nil {
+				slog.Default().Error("failed to process directory", "dir", dirPath, "err", err)
+			}
+			return err
+		})
+	}
+	return p.Wait()
+}
+
+// updateDirMtime updates the directory's modification time based on its contents
+func updateDirMtime(dirPath string, maxUnixTime int64) error {
+	logger := slog.Default()
+
+	// Read directory contents
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return fmt.Errorf("read directory: %w", err)
+	}
+
+	// Create deterministic hash based on directory entries
+	h := sha256.New()
+
+	// Sort entries by name for determinism
+	entryNames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entryNames = append(entryNames, entry.Name())
+	}
+	sort.Strings(entryNames)
+
+	// Write entry names to hash
+	for _, name := range entryNames {
+		h.Write([]byte(name))
+		// Also include whether it's a directory for differentiation
+		for _, entry := range entries {
+			if entry.Name() == name {
+				if entry.IsDir() {
+					h.Write([]byte("/"))
+				}
+				break
+			}
+		}
+	}
+
+	h64 := binary.BigEndian.Uint64(h.Sum(nil)[:8])
+	mtime := hashToTime(h64, maxUnixTime)
+
+	if err := os.Chtimes(dirPath, time.Time{}, mtime); err != nil {
+		return fmt.Errorf("set directory mtime: %w", err)
+	}
+
+	logger.Debug("updated directory modification time", "dir", dirPath, "mtime", mtime)
 	return nil
 }
